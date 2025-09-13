@@ -1,0 +1,75 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+* {
+    padding: 0;
+    margin: 0;
+    font-family: "Courier New", monospace;
+    font-weight: 500;
+    
+
+}
+
+body {
+    overflow: hidden;
+    background-color: black;
+}
+
+textarea {
+    width: 100vw;
+    height: 100vh;
+    color: green;
+    background-color: black;
+    font-size: 18px;
+    outline: none;
+    border: none;
+    resize: none;
+}
+textarea:focus {
+    outline: none;
+    border: none;
+}
+
+
+*::-webkit-scrollbar {
+    width: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: black
+  }
+  *::-webkit-scrollbar-thumb {
+    background: green
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: greenyellow
+  }
+
+@keyframes spinOut {
+    0% {
+        transform: rotate(0deg) scale(1);
+        background-color: black;
+        opacity: 1;
+
+    }
+    50% {
+        transform: rotate(180deg) scale(0.5);
+        opacity: 0.5;
+    }
+    100% {
+        transform: rotate(360deg) scale(0);
+        opacity: 0;
+        background-color: green;
+    }
+}
+
+.terminal-exit {
+    animation: spinOut 1s linear forwards;
+}
+
+.deactivated {
+  height: 100vh;
+  width: 100vw;
+  color: green;
+
+
+}
