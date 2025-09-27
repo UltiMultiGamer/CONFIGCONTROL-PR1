@@ -1,0 +1,5 @@
+#silent
+
+echo This is a test script
+echo Testing VasiScript loading
+something

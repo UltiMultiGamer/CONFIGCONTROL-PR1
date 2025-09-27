@@ -1,0 +1,14 @@
+# Sample .vasi script file
+# This is a comment and will be ignored
+
+echo Hello from .vasi script!
+echo Current user is $USER
+echo Current directory is $PWD
+
+cd ..
+echo Changed to parent directory
+
+echo Making a test request
+request GET https://httpbin.org/get --query "test=value&script=vasi"
+
+echo Script execution finished!

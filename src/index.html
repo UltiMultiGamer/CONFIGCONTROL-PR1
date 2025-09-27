@@ -3,12 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="/logo.ico">
     <title>Totally real terminal</title>
-    <link href="style.css" rel="stylesheet">
 </head>
 <body>
+    <div class="load-container">
+        <button id="loadButton" class="load-button">Load .vasi</button>
+        <input type="file" id="fileInput" accept=".vasi" style="display: none;">
+    </div>
     <textarea id="terminal" autocorrect="off" spellcheck="false"></textarea>
-    
 </body>
-<script src="script.js"></script>
+<script type="module" src="/script.js"></script>
 </html>
