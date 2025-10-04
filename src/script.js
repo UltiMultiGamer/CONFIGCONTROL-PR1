@@ -290,19 +290,43 @@ class terminal {
     }
 
 	async applyParameters() {
-
-
 		if (this.params.vfsPath) {
-			this.setRootFromPath(this.params.vfsPath);
-			this.writeOutput(`VFS root set to: ${this.env.PWD}`);
-			this.newLine();
+			try {
+				if (this.params.vfsPath.endsWith('.csv')) {
+					this.writeOutput(`Loading VFS from: ${this.params.vfsPath}`);
+					this.newLine();
+					const response = await fetch(this.params.vfsPath);
+					if (!response.ok) {
+						throw new Error(`VFS file not found: ${this.params.vfsPath}`);
+					}
+					const csvContent = await response.text();
+					const success = this.importVfsFromCsv(csvContent);
+					if (success) {
+						this.writeOutput("VFS loaded successfully!");
+						this.newLine();
+					} else {
+						throw new Error("Invalid VFS file format");
+					}
+				} else {
+					this.setRootFromPath(this.params.vfsPath);
+					this.writeOutput(`VFS root set to: ${this.env.PWD}`);
+					this.newLine();
+				}
+			} catch (error) {
+				this.writeError(`Error loading VFS: ${error.message}`);
+				this.newLine();
+				this.vfsTree.name = this.vfsTree.name || 'C:';
+				this.currentDir = [this.vfsTree.name];
+				this.updatePath();
+			}
 		} else {
 			this.vfsTree.name = this.vfsTree.name || 'C:';
 			this.currentDir = [this.vfsTree.name];
 			this.updatePath();
-			if (!this.env.HOME) this.env.HOME = this.env.PWD;
-			if (!this.env.PATH) this.env.PATH = this.env.PWD;
 		}
+		
+		if (!this.env.HOME) this.env.HOME = this.env.PWD;
+		if (!this.env.PATH) this.env.PATH = this.env.PWD;
         this.writeOutput("Terminal ready. Type 'help' for available commands.");
         this.newLine();
         if (this.params.scriptPath) {
@@ -347,9 +371,16 @@ class terminal {
 
     initFileLoader() {
         const loadButton = document.querySelector("#loadButton");
+        const importButton = document.querySelector("#importButton");
         const fileInput = document.querySelector("#fileInput");
         
         loadButton.addEventListener("click", () => {
+            fileInput.accept = ".vasi";
+            fileInput.click();
+        });
+        
+        importButton.addEventListener("click", () => {
+            fileInput.accept = ".csv";
             fileInput.click();
         });
         
@@ -357,8 +388,10 @@ class terminal {
             const file = e.target.files[0];
             if (file && file.name.endsWith('.vasi')) {
                 this.loadScript(file);
+            } else if (file && file.name.endsWith('.csv')) {
+                this.importVfsFromFile(file);
             } else {
-                this.writeOutput("Please select a .vasi file");
+                this.writeOutput("Please select a .vasi or .csv file");
                 this.newLine();
             }
         });
@@ -385,6 +418,62 @@ class terminal {
         } catch (error) {
             this.writeError(`Error loading script: ${error.message}`);
             this.newLine();
+        }
+    }
+
+    async importVfsFromFile(file) {
+        try {
+            const content = await file.text();
+            this.writeOutput(`Importing VFS from: ${file.name}`);
+            this.newLine();
+            
+            const success = this.importVfsFromCsv(content);
+            if (success) {
+                this.writeOutput("VFS import completed!");
+                this.newLine();
+                this.writeOutput("Current VFS structure:");
+                this.newLine();
+                const lines = this.collectTreeLines(this.vfsTree, 0);
+                for (const line of lines) {
+                    this.writeOutput(`  ${line}`);
+                    this.newLine();
+                }
+            } else {
+                this.writeError("VFS import failed. Invalid CSV format.");
+            }
+            this.newLine();
+        } catch (error) {
+            this.writeError(`Error importing VFS: ${error.message}`);
+            this.newLine();
+        }
+    }
+
+    importVfsFromCsv(csvContent) {
+        try {
+            const lines = csvContent.trim().split('\n');
+            if (lines.length < 2 || lines[0] !== 'path') {
+                return false;
+            }
+            
+            const paths = lines.slice(1).filter(line => line.trim());
+            if (paths.length === 0) {
+                return false;
+            }
+            
+            this.vfsTree = { name: 'C:', children: {} };
+            this.currentDir = [this.vfsTree.name];
+            this.updatePath();
+            
+            for (const path of paths) {
+                const parts = this.splitPath(path);
+                if (parts.length > 0) {
+                    this.createDir(parts);
+                }
+            }
+            
+            return true;
+        } catch (error) {
+            return false;
         }
     }
 
@@ -568,7 +657,6 @@ class terminal {
         - tree [path]: Print directory tree
         - du [path] [--absolute]: Show disk usage of directories
         - exportvfs [--debug]: Export VFS as CSV file
-		- savecsv [filename]: Download current VFS as CSV
         - mkdir <path>: Create directory
         - rmdir <path>: Remove empty directory
         - whoami: Show current user
@@ -580,9 +668,9 @@ class terminal {
         - exit: Close the terminal
 
 URL Parameters:
-        - ?vfs-path=<path>: Set VFS root directory
+        - ?vfs-path=<path>: Set VFS root directory or load CSV file
         - ?script-path=<file>: Auto-execute startup script
-        - Example: ?vfs-path=D:\\&script-path=startup.vasi`;
+        - Example: ?vfs-path=vfs_export.csv&script-path=startup.vasi`;
             this.writeOutput(helpText);
             this.newLine();
         },
@@ -776,21 +864,7 @@ ${csvData}`;
         },
 
 
-        savecsv: (args) => {
-            const name = args[0] && args[0].length > 0 ? args[0] : 'vfs.csv';
-            const rows = this.serializeCsv();
-            const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 0);
-            this.writeOutput(`Saved ${name}`);
-            this.newLine();
-        },
+
 
         clear: (args) => {
             const terminal = document.querySelector("#terminal");
