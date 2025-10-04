@@ -11,6 +11,7 @@ class terminal {
 		this.env = { NAME: 'User', USER: 'User' };
         this.startupScript = null;
         this.params = this.parseURLParams();
+        this.startTime = Date.now();
         this.init();
     }
 
@@ -499,6 +500,37 @@ class terminal {
         return true;
     }
 
+    calculateDirSize(node) {
+        let totalSize = 0;
+        const childNames = Object.keys(node.children);
+        
+        for (const name of childNames) {
+            const child = node.children[name];
+            totalSize += this.calculateDirSize(child);
+            totalSize += name.length * 2;
+        }
+        
+        return totalSize;
+    }
+
+    calculateAbsoluteSize(node) {
+        const csvData = this.serializeCsv();
+        return new Blob([csvData], { type: 'text/csv' }).size;
+    }
+
+    formatSize(bytes) {
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let size = bytes;
+        let unitIndex = 0;
+        
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex++;
+        }
+        
+        return `${size.toFixed(1)}${units[unitIndex]}`;
+    }
+
 
 
     async executeScript(scriptContent) {
@@ -534,9 +566,13 @@ class terminal {
         - ls [path]: List directory contents
         - pwd: Print current directory
         - tree [path]: Print directory tree
+        - du [path] [--absolute]: Show disk usage of directories
+        - exportvfs [--debug]: Export VFS as CSV file
 		- savecsv [filename]: Download current VFS as CSV
         - mkdir <path>: Create directory
         - rmdir <path>: Remove empty directory
+        - whoami: Show current user
+        - uptime: Show terminal uptime
         - clear: Clear terminal
         - echo <text>: Print text to terminal (supports $VARIABLE substitution)
         - request <method> <url> [options]: Make HTTP requests
@@ -631,6 +667,112 @@ URL Parameters:
                 this.writeOutput(line);
                 this.newLine();
             }
+        },
+
+        du: (args) => {
+            const hasAbsoluteFlag = args.includes('--absolute');
+            const path = args.find(arg => !arg.startsWith('--'));
+            const parts = path ? this.resolvePathParts(path, this.currentDir) : this.currentDir.slice();
+            const node = this.getNodeForParts(parts);
+            if (!node) {
+                this.writeError("Path not found");
+                this.newLine();
+                return;
+            }
+            
+            const childNames = Object.keys(node.children).sort();
+            let totalSize = 0;
+            
+            if (hasAbsoluteFlag) {
+                const fullCsvSize = this.calculateAbsoluteSize(this.vfsTree);
+                for (const name of childNames) {
+                    const child = node.children[name];
+                    const childCsvSize = this.calculateAbsoluteSize(child);
+                    totalSize += childCsvSize;
+                    this.writeOutput(`${this.formatSize(childCsvSize).padStart(8)} ${name}`);
+                    this.newLine();
+                }
+                this.writeOutput(`${this.formatSize(fullCsvSize).padStart(8)} total`);
+                this.newLine();
+            } else {
+                for (const name of childNames) {
+                    const child = node.children[name];
+                    const size = this.calculateDirSize(child);
+                    totalSize += size;
+                    this.writeOutput(`${this.formatSize(size).padStart(8)} ${name}`);
+                    this.newLine();
+                }
+                if (childNames.length > 0) {
+                    this.writeOutput(`${this.formatSize(totalSize).padStart(8)} total`);
+                    this.newLine();
+                } else {
+                    this.writeOutput("No subdirectories found");
+                    this.newLine();
+                }
+            }
+        },
+
+        whoami: (args) => {
+            this.writeOutput(this.env.USER || this.env.NAME || 'User');
+            this.newLine();
+        },
+
+        uptime: (args) => {
+            const uptimeMs = Date.now() - this.startTime;
+            const seconds = Math.floor(uptimeMs / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+            
+            let uptimeStr = '';
+            if (days > 0) uptimeStr += `${days} day${days > 1 ? 's' : ''}, `;
+            if (hours % 24 > 0) uptimeStr += `${hours % 24} hour${(hours % 24) > 1 ? 's' : ''}, `;
+            if (minutes % 60 > 0) uptimeStr += `${minutes % 60} minute${(minutes % 60) > 1 ? 's' : ''}, `;
+            uptimeStr += `${seconds % 60} second${(seconds % 60) > 1 ? 's' : ''}`;
+            
+            this.writeOutput(`Terminal uptime: ${uptimeStr}`);
+            this.newLine();
+        },
+
+        exportvfs: (args) => {
+            const hasDebugFlag = args.includes('--debug');
+            const csvData = this.serializeCsv();
+            
+            let exportData, fileName, mimeType;
+            
+            if (hasDebugFlag) {
+                const csvSize = this.calculateAbsoluteSize(this.vfsTree);
+                
+                exportData = `=== VFS Structure Analysis ===
+
+VFS Tree Structure:
+${this.collectTreeLines(this.vfsTree, 0).map(line => `  ${line}`).join('\n')}
+
+Size Calculations:
+  CSV export size: ${this.formatSize(csvSize)}
+
+CSV Data:
+${csvData}`;
+                fileName = 'vfs_analysis.txt';
+                mimeType = 'text/plain;charset=utf-8;';
+            } else {
+                exportData = csvData;
+                fileName = 'vfs_export.csv';
+                mimeType = 'text/csv;charset=utf-8;';
+            }
+
+            const blob = new Blob([exportData], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+            
+            this.writeOutput(`Exported VFS to ${fileName}`);
+            this.newLine();
         },
 
 
