@@ -6,14 +6,9 @@ class terminal {
         this.currentDir = [`C:`];
         this.cmdHistory = [];
         this.historyIndex = -1;
-        this.env = {
-            NAME: 'User',
-            USER: 'User',
-            PATH: 'C:\\',
-            PWD: 'C:\\',
-            HOME: 'C:\\'
-        };
-        this.vfsRoot = 'C:\\';
+		this.vfsTree = { name: 'C:', children: {} };
+		this.currentNode = this.vfsTree;
+		this.env = { NAME: 'User', USER: 'User' };
         this.startupScript = null;
         this.params = this.parseURLParams();
         this.init();
@@ -214,7 +209,11 @@ class terminal {
     }
 
     updatePath() {
-        this.currPath = this.currentDir.join("\\") + "\\>";
+		this.currPath = this.currentDir.join("\\") + "\\>";
+		this.env.PWD = this.currentDir.join("\\");
+		this.currentNode = this.getNodeForParts(this.currentDir) || this.vfsTree;
+		this.env.HOME = this.env.HOME || this.currentDir[0] + '\\';
+		this.env.PATH = this.env.PATH || this.currentDir[0] + '\\';
     }
 
     substituteEnvVars(text) {
@@ -266,17 +265,19 @@ class terminal {
                 return true;
             }
             return false;
-        } else if (path === ".") {
-            return true;
-        } else if (path === "~" || path === "") {
-            this.currentDir = [this.vfsRoot];
-            this.updatePath();
-            return true;
-        } else {
-            this.currentDir.push(path);
+        }
+        if (path === ".") return true;
+        if (path === "~" || path === "") {
+            this.currentDir = [this.vfsTree.name];
             this.updatePath();
             return true;
         }
+        const targetParts = this.resolvePathParts(path, this.currentDir);
+        const node = this.getNodeForParts(targetParts);
+        if (!node) return false;
+        this.currentDir = targetParts;
+        this.updatePath();
+        return true;
     }
 
     parseURLParams() {
@@ -287,25 +288,20 @@ class terminal {
         };
     }
 
-    async applyParameters() {
+	async applyParameters() {
 
-        // this.writeOutput("Debug output parameters:");
-        // this.newLine();
-        // this.writeOutput(`  VFS Root: ${this.params.vfsPath || 'C:\\ (default)'}`);
-        // this.newLine();
-        // this.writeOutput(`  Startup Script: ${this.params.scriptPath || 'None'}`);
-        // this.newLine();
-        // this.newLine();
 
-        if (this.params.vfsPath) {
-            this.vfsRoot = this.params.vfsPath;
-            this.currentDir = [this.vfsRoot];
-            this.env.PWD = this.vfsRoot;
-            this.env.HOME = this.vfsRoot;
-            this.updatePath();
-            this.writeOutput(`VFS root set to: ${this.vfsRoot}`);
-            this.newLine();
-        }
+		if (this.params.vfsPath) {
+			this.setRootFromPath(this.params.vfsPath);
+			this.writeOutput(`VFS root set to: ${this.env.PWD}`);
+			this.newLine();
+		} else {
+			this.vfsTree.name = this.vfsTree.name || 'C:';
+			this.currentDir = [this.vfsTree.name];
+			this.updatePath();
+			if (!this.env.HOME) this.env.HOME = this.env.PWD;
+			if (!this.env.PATH) this.env.PATH = this.env.PWD;
+		}
         this.writeOutput("Terminal ready. Type 'help' for available commands.");
         this.newLine();
         if (this.params.scriptPath) {
@@ -337,6 +333,17 @@ class terminal {
         this.writeDir();
     }
 
+	setRootFromPath(pathStr) {
+		const parts = this.splitPath(pathStr);
+		if (parts.length === 0) return;
+		const drive = parts[0].includes(':') ? parts[0] : (this.vfsTree.name || 'C:');
+		this.vfsTree.name = drive;
+		this.currentDir = parts[0].includes(':') ? parts : [drive, ...parts];
+		this.updatePath();
+		this.env.HOME = this.env.PWD;
+		this.env.PATH = this.env.PWD;
+	}
+
     initFileLoader() {
         const loadButton = document.querySelector("#loadButton");
         const fileInput = document.querySelector("#fileInput");
@@ -355,6 +362,8 @@ class terminal {
             }
         });
     }
+
+
 
     async loadScript(file) {
         try {
@@ -380,11 +389,123 @@ class terminal {
 
 
 
+
+
+    splitPath(input) {
+        let s = input.replace(/\//g, '\\');
+        s = s.replace(/^\\+/, '');
+        const parts = s.split('\\').filter(p => p.length > 0).map(p => p.replace(/\\+$/,''));
+        if (parts.length === 0) return [];
+        if (parts[0].includes(':')) parts[0] = parts[0].split(':')[0] + ':';
+        return parts;
+    }
+
+    buildTree(paths) {
+        for (const parts of paths) {
+            let idx = 0;
+            let node = this.vfsTree;
+            if (parts[0].includes(':')) idx = 1;
+            for (let i = idx; i < parts.length; i++) {
+                const name = parts[i];
+                if (!node.children[name]) node.children[name] = { name, children: {} };
+                node = node.children[name];
+            }
+        }
+    }
+
+    getNodeForParts(parts) {
+        let node = this.vfsTree;
+        let start = 0;
+        if (parts[0] && parts[0].includes(':')) start = 1;
+        for (let i = start; i < parts.length; i++) {
+            const name = parts[i];
+            if (!node.children[name]) return null;
+            node = node.children[name];
+        }
+        return node;
+    }
+
+    collectTreeLines(node, level) {
+        const lines = [];
+        const indent = '  '.repeat(level);
+        const names = Object.keys(node.children).sort();
+        for (const name of names) {
+            lines.push(`${indent}${name}`);
+            const child = node.children[name];
+            const childLines = this.collectTreeLines(child, level + 1);
+            for (const l of childLines) lines.push(l);
+        }
+        return lines;
+    }
+
+    serializeCsv() {
+        const rows = [];
+        const root = this.vfsTree.name;
+        const walk = (n, prefixParts) => {
+            const names = Object.keys(n.children).sort();
+            for (const name of names) {
+                const next = n.children[name];
+                const parts = [...prefixParts, name];
+                rows.push(parts.join('\\'));
+                walk(next, parts);
+            }
+        };
+        walk(this.vfsTree, [root]);
+        return ['path', ...rows].join('\n');
+    }
+
+	resolvePathParts(input, baseParts) {
+		const raw = this.splitPath(input);
+		let stack = baseParts.slice();
+		if (raw[0] && raw[0].includes(':')) stack = [raw[0]];
+		let i = raw[0] && raw[0].includes(':') ? 1 : 0;
+		for (; i < raw.length; i++) {
+			const p = raw[i];
+			if (p === '.' || p === '') continue;
+			if (p === '..') { if (stack.length > 1) stack.pop(); continue; }
+			stack.push(p);
+		}
+		return stack;
+	}
+
+    createDir(parts) {
+        let node = this.vfsTree;
+        console.log(node)
+        let start = 0;
+        if (parts[0] && parts[0].includes(':')) start = 1;
+        for (let i = start; i < parts.length; i++) {
+            const name = parts[i];
+            if (!node.children[name]) node.children[name] = { name, children: {} };
+            node = node.children[name];
+        }
+        return true;
+    }
+
+    removeDir(parts) {
+        if (parts.length <= 1) return false;
+        const parents = [];
+        let node = this.vfsTree;
+        let start = 0;
+        if (parts[0] && parts[0].includes(':')) start = 1;
+        for (let i = start; i < parts.length; i++) {
+            const name = parts[i];
+            parents.push({ node, name });
+            if (!node.children[name]) return false;
+            node = node.children[name];
+        }
+        if (Object.keys(node.children).length > 0) return false;
+        const last = parents[parents.length - 1];
+        delete last.node.children[last.name];
+        return true;
+    }
+
+
+
     async executeScript(scriptContent) {
         const rawLines = scriptContent.split('\n');
         const hasSilentFlag = rawLines.some(line => {
             const t = line.trim().toLowerCase();
-            return t === 'silent' || t === '#silent' || t === '# silent' || t === '@silent';
+            return t === '#silent';
         });
         const commands = rawLines
             .map(line => line.trim())
@@ -410,7 +531,12 @@ class terminal {
         `Available commands:
         - help: Show this help message
         - cd <path>: Change directory
-        - ls: List directory contents
+        - ls [path]: List directory contents
+        - pwd: Print current directory
+        - tree [path]: Print directory tree
+		- savecsv [filename]: Download current VFS as CSV
+        - mkdir <path>: Create directory
+        - rmdir <path>: Remove empty directory
         - clear: Clear terminal
         - echo <text>: Print text to terminal (supports $VARIABLE substitution)
         - request <method> <url> [options]: Make HTTP requests
@@ -427,16 +553,100 @@ URL Parameters:
 
         cd: (args) => {
             const path = args[0] || '~';
-            if (this.navigateTo(path)) {
+			if (this.navigateTo(path)) {
                 this.writeOutput(`Changed directory to: ${this.currentDir.join("\\")}`);
             } else {
-                this.writeOutput(`Cannot go up from root directory`);
+                if (path === '..') {
+                    this.writeOutput(`Cannot go up from root directory`);
+                } else {
+                    this.writeError(`Path not found`);
+                }
             }
             this.newLine();
         },
 
         ls: (args) => {
-            this.writeOutput('not implemented but pretend something is here');
+            const path = args[0];
+            const parts = path ? this.resolvePathParts(path, this.currentDir) : this.currentDir.slice();
+            const node = this.getNodeForParts(parts);
+            if (!node) {
+                this.writeError("Path not found");
+                this.newLine();
+                return;
+            }
+            const names = Object.keys(node.children).sort();
+            this.writeOutput(names.join("  "));
+            this.newLine();
+        },
+
+        mkdir: (args) => {
+            if (args.length === 0) {
+                this.writeOutput("Usage: mkdir <path>");
+                this.newLine();
+                return;
+            }
+            const parts = this.resolvePathParts(args[0], this.currentDir);
+            this.createDir(parts);
+            this.writeOutput("Directory created");
+            this.newLine();
+        },
+
+        rmdir: (args) => {
+            if (args.length === 0) {
+                this.writeOutput("Usage: rmdir <path>");
+                this.newLine();
+                return;
+            }
+            const parts = this.resolvePathParts(args[0], this.currentDir);
+            if (parts.length <= 1) {
+                this.writeError("Cannot remove root");
+                this.newLine();
+                return;
+            }
+            const ok = this.removeDir(parts);
+            if (!ok) {
+                this.writeError("Directory not empty or not found");
+            } else {
+                this.writeOutput("Directory removed");
+            }
+            this.newLine();
+        },
+
+        pwd: (args) => {
+            this.writeOutput(this.currentDir.join("\\"));
+            this.newLine();
+        },
+
+        tree: (args) => {
+            const path = args[0];
+            const parts = path ? this.resolvePathParts(path, this.currentDir) : this.currentDir.slice();
+            const node = this.getNodeForParts(parts);
+            if (!node) {
+                this.writeError("Path not found");
+                this.newLine();
+                return;
+            }
+            const lines = this.collectTreeLines(node, 0);
+            for (const line of lines) {
+                this.writeOutput(line);
+                this.newLine();
+            }
+        },
+
+
+        savecsv: (args) => {
+            const name = args[0] && args[0].length > 0 ? args[0] : 'vfs.csv';
+            const rows = this.serializeCsv();
+            const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+            this.writeOutput(`Saved ${name}`);
             this.newLine();
         },
 
