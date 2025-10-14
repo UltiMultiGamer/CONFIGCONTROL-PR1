@@ -442,9 +442,11 @@ class terminal {
                 this.writeError("VFS import failed. Invalid CSV format.");
             }
             this.newLine();
+            this.writeDir();
         } catch (error) {
             this.writeError(`Error importing VFS: ${error.message}`);
             this.newLine();
+            this.writeDir();
         }
     }
 
@@ -571,6 +573,34 @@ class terminal {
         return true;
     }
 
+    createFile(parts) {
+        let node = this.vfsTree;
+        let start = 0;
+        if (parts[0] && parts[0].includes(':')) start = 1;
+        
+
+        for (let i = start; i < parts.length - 1; i++) {
+            const name = parts[i];
+            if (!node.children[name]) node.children[name] = { name, children: {} };
+            node = node.children[name];
+        }
+        
+        const fileName = parts[parts.length - 1];
+        if (!node.children[fileName]) {
+            node.children[fileName] = { 
+                name: fileName, 
+                children: {}, 
+                isFile: true,
+                content: '',
+                created: new Date().toISOString(),
+                modified: new Date().toISOString()
+            };
+        } else {
+            node.children[fileName].modified = new Date().toISOString();
+        }
+        return true;
+    }
+
     removeDir(parts) {
         if (parts.length <= 1) return false;
         const parents = [];
@@ -659,6 +689,7 @@ class terminal {
         - exportvfs [--debug]: Export VFS as CSV file
         - mkdir <path>: Create directory
         - rmdir <path>: Remove empty directory
+        - touch <filename>: Create empty file or update timestamp
         - whoami: Show current user
         - uptime: Show terminal uptime
         - clear: Clear terminal
@@ -699,7 +730,16 @@ URL Parameters:
                 return;
             }
             const names = Object.keys(node.children).sort();
-            this.writeOutput(names.join("  "));
+            if (names.length === 0) {
+                this.writeOutput("Directory is empty");
+            } else {
+                const items = names.map(name => {
+                    const child = node.children[name];
+                    const indicator = child.isFile ? '[FILE]' : '[DIR]';
+                    return `${indicator} ${name}`;
+                });
+                this.writeOutput(items.join('\n'));
+            }
             this.newLine();
         },
 
@@ -732,6 +772,27 @@ URL Parameters:
                 this.writeError("Directory not empty or not found");
             } else {
                 this.writeOutput("Directory removed");
+            }
+            this.newLine();
+        },
+
+        touch: (args) => {
+            if (args.length === 0) {
+                this.writeOutput("Usage: touch <filename>");
+                this.newLine();
+                return;
+            }
+            const parts = this.resolvePathParts(args[0], this.currentDir);
+            if (parts.length <= 1) {
+                this.writeError("Cannot create file at root");
+                this.newLine();
+                return;
+            }
+            const ok = this.createFile(parts);
+            if (ok) {
+                this.writeOutput("File created or updated");
+            } else {
+                this.writeError("Failed to create file, storage much?");
             }
             this.newLine();
         },
